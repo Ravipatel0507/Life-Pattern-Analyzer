@@ -1293,20 +1293,61 @@ document.getElementById('current-date').textContent = new Date().toLocaleDateStr
     day: 'numeric'
 });
 
+// ── IP Location fallback ──
+async function getIPLocation() {
+    try {
+        const res  = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.error) throw new Error(data.reason);
+        return {
+            city:    data.city         || 'Unknown',
+            region:  data.region       || '',
+            country: data.country_name || '',
+            lat:     data.latitude,
+            lon:     data.longitude,
+            tz:      data.timezone     || Intl.DateTimeFormat().resolvedOptions().timeZone,
+            source:  '🌐 IP location'
+        };
+    } catch {
+        try {
+            const res  = await fetch('http://ip-api.com/json/');
+            const data = await res.json();
+            return {
+                city:    data.city       || 'Unknown',
+                region:  data.regionName || '',
+                country: data.country    || '',
+                lat:     data.lat,
+                lon:     data.lon,
+                tz:      data.timezone   || Intl.DateTimeFormat().resolvedOptions().timeZone,
+                source:  '🌐 IP location'
+            };
+        } catch { return null; }
+    }
+}
+
 // ── Get city name from GPS coords using reverse geocoding ──
 async function reverseGeocode(lat, lon) {
     try {
-        const url = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&language=en&format=json`;
-        const res  = await fetch(url);
+        const res  = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10&addressdetails=1`,
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'LifePatternAnalyzer/1.0' } }
+        );
         const data = await res.json();
-        const r    = (data.results || [])[0] || {};
-        return {
-            city:     r.name    || 'Your Location',
-            country:  r.country || '',
-            timezone: r.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
-        };
+        const addr = data.address || {};
+        const city =
+            addr.suburb       ||
+            addr.village      ||
+            addr.town         ||
+            addr.city         ||
+            addr.municipality ||
+            addr.county       ||
+            'Your Location';
+        const country  = addr.country || '';
+        const region   = addr.state   || addr.region || '';
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return { city, country, region, timezone };
     } catch {
-        return { city: 'Your Location', country: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+        return { city: 'Your Location', country: '', region: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
     }
 }
 
@@ -1436,11 +1477,19 @@ async function analyzeLife() {
         const geo = await reverseGeocode(lat, lon);
 
         // Step 3 — send GPS coords to backend
-        await runAnalysis({ lat, lon, city: geo.city, country: geo.country, timezone: geo.timezone });
+        const label = geo.region ? geo.city + ', ' + geo.region : geo.city;
+        await runAnalysis({ lat, lon, city: label, country: geo.country, timezone: geo.timezone });
 
     } catch (err) {
-        // GPS denied or unavailable → show manual input
-        showManualInput();
+        // ② GPS denied — silently try IP location
+        const ip = await getIPLocation();
+        if (ip && ip.city && ip.city !== 'Unknown') {
+            const label = ip.region ? ip.city + ', ' + ip.region : ip.city;
+            await runAnalysis({ lat: ip.lat, lon: ip.lon, city: label, country: ip.country, timezone: ip.tz });
+        } else {
+            // ③ IP also failed — ask user to type city manually
+            showManualInput();
+        }
     }
 }
 
