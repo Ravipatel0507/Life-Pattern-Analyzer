@@ -1084,17 +1084,44 @@ h1 {
 /* Footer */
 footer {
     margin-top: 80px;
-    padding: 40px 0;
+    padding: 60px 0 40px;
     border-top: 2px solid var(--black);
     text-align: center;
+    background: var(--black);
+}
+
+.footer-quote {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(18px, 2.5vw, 26px);
+    font-style: italic;
+    color: var(--white);
+    max-width: 780px;
+    margin: 0 auto 12px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+}
+
+.footer-author {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 36px;
+}
+
+.footer-divider {
+    width: 60px;
+    height: 2px;
+    background: var(--accent);
+    margin: 0 auto 32px;
 }
 
 .footer-text {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--graphite);
+    letter-spacing: 1px;
+    color: #555;
     line-height: 2;
 }
 
@@ -1276,10 +1303,17 @@ footer {
     </div>
 
     <footer>
+        <div class="footer-quote">
+            "Crafted by Ravi Patel &mdash; combining circadian biology, live atmospheric data,
+            and lunar science into a single tool that tells you not just what time it is,
+            but what time it is <em>for you</em>."
+        </div>
+        <div class="footer-author">&mdash; Ravi Patel</div>
+        <div class="footer-divider"></div>
         <div class="footer-text">
-            Built with real-time data from Open-Meteo, IP-API & Circadian Science<br>
-            <a href="#" onclick="analyzeLife(); return false;">Run Analysis Again</a> | 
-            No tracking, No cookies, Pure optimization
+            Built with Python &middot; Flask &middot; JavaScript &middot; Open-Meteo &middot; OpenStreetMap &middot; ipapi.co<br>
+            <a href="#" onclick="analyzeLife(); return false;">↺ Run Analysis Again</a> &nbsp;&middot;&nbsp;
+            No tracking &nbsp;&middot;&nbsp; No cookies &nbsp;&middot;&nbsp; Pure optimization
         </div>
     </footer>
 </div>
