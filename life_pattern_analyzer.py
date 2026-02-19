@@ -359,33 +359,69 @@ def home():
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
-    """Main analysis endpoint"""
+    """Main analysis endpoint — accepts GPS coords or falls back to IP"""
     try:
-        # Collect all real-time data
-        location = get_ip_location()
-        weather = get_weather(location['lat'], location['lon'])
-        moon = get_moon_phase()
+        body = request.get_json(silent=True) or {}
+
+        # ── Option 1: Browser sent GPS coordinates ──
+        if body.get('lat') and body.get('lon'):
+            lat = float(body['lat'])
+            lon = float(body['lon'])
+            city    = body.get('city', 'Your Location')
+            country = body.get('country', '')
+            timezone = body.get('timezone', 'UTC')
+            location = {
+                'city': city,
+                'country': country,
+                'lat': lat,
+                'lon': lon,
+                'timezone': timezone,
+                'isp': 'GPS',
+                'source': '📍 GPS (exact)'
+            }
+
+        # ── Option 2: User typed a city manually ──
+        elif body.get('city'):
+            city_name = body['city']
+            geo_url = f'https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1&language=en&format=json'
+            geo_resp = requests.get(geo_url, timeout=5).json()
+            results  = geo_resp.get('results', [])
+            if not results:
+                return jsonify({'success': False, 'error': f'City "{city_name}" not found. Try a different spelling.'}), 400
+            r = results[0]
+            location = {
+                'city':     r.get('name', city_name),
+                'country':  r.get('country', ''),
+                'lat':      r['latitude'],
+                'lon':      r['longitude'],
+                'timezone': r.get('timezone', 'UTC'),
+                'isp':      'Manual',
+                'source':   '🔍 Manual entry'
+            }
+
+        # ── Option 3: Fallback — IP geolocation ──
+        else:
+            location = get_ip_location()
+            location['source'] = '🌐 IP (approximate)'
+
+        weather   = get_weather(location['lat'], location['lon'])
+        moon      = get_moon_phase()
         circadian = calculate_circadian_rhythm()
-        
-        # Analyze patterns
-        analysis = analyze_productivity_pattern(weather, moon, circadian, location)
-        
+        analysis  = analyze_productivity_pattern(weather, moon, circadian, location)
+
         return jsonify({
-            'success': True,
+            'success':   True,
             'timestamp': datetime.now().isoformat(),
-            'location': location,
-            'weather': weather,
-            'moon': moon,
+            'location':  location,
+            'weather':   weather,
+            'moon':      moon,
             'circadian': circadian,
-            'analysis': analysis,
-            'tip': get_random_productivity_tip()
+            'analysis':  analysis,
+            'tip':       get_random_productivity_tip()
         })
-    
+
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/quick-insight', methods=['GET'])
 def quick_insight():
@@ -1257,31 +1293,110 @@ document.getElementById('current-date').textContent = new Date().toLocaleDateStr
     day: 'numeric'
 });
 
-async function analyzeLife() {
-    // Hide results, show loading
-    document.getElementById('results').style.display = 'none';
+// ── Get city name from GPS coords using reverse geocoding ──
+async function reverseGeocode(lat, lon) {
+    try {
+        const url = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&language=en&format=json`;
+        const res  = await fetch(url);
+        const data = await res.json();
+        const r    = (data.results || [])[0] || {};
+        return {
+            city:     r.name    || 'Your Location',
+            country:  r.country || '',
+            timezone: r.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+        };
+    } catch {
+        return { city: 'Your Location', country: '', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+    }
+}
+
+// ── Ask browser for GPS ──
+function getGPSLocation() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) { reject(new Error('no_gps')); return; }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 8000, maximumAge: 300000, enableHighAccuracy: true
+        });
+    });
+}
+
+// ── Show manual city input box ──
+function showManualInput() {
+    document.getElementById('loading').style.display = 'none';
+
+    // Create modal if it doesn't exist yet
+    if (!document.getElementById('city-modal')) {
+        const modal = document.createElement('div');
+        modal.id = 'city-modal';
+        modal.style.cssText = `
+            position:fixed; inset:0; background:rgba(0,0,0,0.7);
+            display:flex; align-items:center; justify-content:center; z-index:9999;
+        `;
+        modal.innerHTML = `
+            <div style="background:#1a1a1a; border:1px solid #333; border-radius:12px;
+                        padding:36px; max-width:420px; width:90%; text-align:center;">
+                <div style="font-size:36px; margin-bottom:16px;">📍</div>
+                <h3 style="color:#fafafa; font-size:20px; margin-bottom:8px;">Enter Your City</h3>
+                <p style="color:#888; font-size:14px; margin-bottom:24px;">
+                    GPS access was denied. Type your city for accurate weather & analysis.
+                </p>
+                <input id="city-input" type="text" placeholder="e.g. Calgary, London, Tokyo"
+                    style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #444;
+                           background:#0a0a0a; color:#fafafa; font-size:16px; margin-bottom:16px;
+                           outline:none; font-family:inherit;"
+                />
+                <button onclick="submitCity()"
+                    style="width:100%; padding:14px; border-radius:8px; border:none;
+                           background:#ff4444; color:#fff; font-size:16px; cursor:pointer;
+                           font-family:inherit; font-weight:600;">
+                    Analyze My Day →
+                </button>
+                <p style="color:#555; font-size:12px; margin-top:16px;">
+                    Or <a href="#" onclick="runAnalysis({})" style="color:#ff4444;">
+                    continue with approximate IP location</a>
+                </p>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Submit on Enter key
+        modal.querySelector('#city-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') submitCity();
+        });
+    }
+
+    document.getElementById('city-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('city-input').focus(), 100);
+}
+
+function closeModal() {
+    const m = document.getElementById('city-modal');
+    if (m) m.style.display = 'none';
+}
+
+async function submitCity() {
+    const city = document.getElementById('city-input').value.trim();
+    if (!city) { document.getElementById('city-input').style.border = '1px solid #ff4444'; return; }
+    closeModal();
     document.getElementById('loading').style.display = 'block';
-    
-    // Scroll to top smoothly
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    
+    await runAnalysis({ city });
+}
+
+// ── Core analysis runner ──
+async function runAnalysis(payload) {
     try {
         const response = await fetch('/api/analyze', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
-        
         const data = await response.json();
-        
+
         if (data.success) {
             displayResults(data);
-            
-            // Hide loading, show results
             setTimeout(() => {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('results').style.display = 'block';
-                
-                // Scroll reveal animation
                 setTimeout(() => {
                     document.querySelectorAll('.stat-card, .insight-card').forEach((el, i) => {
                         setTimeout(() => {
@@ -1306,11 +1421,34 @@ async function analyzeLife() {
     }
 }
 
+// ── Main entry point ──
+async function analyzeLife() {
+    document.getElementById('results').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    try {
+        // Step 1 — try GPS
+        const position = await getGPSLocation();
+        const { latitude: lat, longitude: lon } = position.coords;
+
+        // Step 2 — reverse geocode to get city name
+        const geo = await reverseGeocode(lat, lon);
+
+        // Step 3 — send GPS coords to backend
+        await runAnalysis({ lat, lon, city: geo.city, country: geo.country, timezone: geo.timezone });
+
+    } catch (err) {
+        // GPS denied or unavailable → show manual input
+        showManualInput();
+    }
+}
+
 function displayResults(data) {
     // Location & Weather
     document.getElementById('location-city').textContent = data.location.city;
-    document.getElementById('location-details').textContent = 
-        `${data.location.country} • ${data.location.timezone}`;
+    document.getElementById('location-details').textContent =
+        `${data.location.country} • ${data.location.timezone} • ${data.location.source || ''}`;
     
     document.getElementById('weather-temp').textContent = 
         `${data.weather.temperature}°C`;
