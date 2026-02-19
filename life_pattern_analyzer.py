@@ -1308,7 +1308,7 @@ footer {
             and lunar science into a single tool that tells you not just what time it is,
             but what time it is <em>for you</em>."
         </div>
-        <div class="footer-author">&mdash; Ravi Patel</div>
+        
         <div class="footer-divider"></div>
         <div class="footer-text">
             Built with Python &middot; Flask &middot; JavaScript &middot; Open-Meteo &middot; OpenStreetMap &middot; ipapi.co<br>
